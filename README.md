@@ -2,6 +2,10 @@
 
 Local whisper.cpp voice transcription.
 
+## Verify
+
+`:checkhealth whisper_nvim`
+
 ## Install (lazy)
 
 ```lua
