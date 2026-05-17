@@ -6,6 +6,12 @@ Local whisper.cpp voice transcription.
 
 `:checkhealth whisper_nvim`
 
+## Dependencies
+
+- `arecord` (alsa-utils) — audio capture
+- `ffmpeg` / `ffprobe` — audio processing
+- `whisper-cli` binary + GGML model file (user-configured)
+
 ## Install (lazy)
 
 ```lua
