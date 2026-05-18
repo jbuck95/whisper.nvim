@@ -19,15 +19,21 @@ function M.check()
 	end
 
 	if vim.fn.executable("ffmpeg") == 1 then
-		vim.health.ok("ffmpeg (WAV fix/resample)")
+		vim.health.ok("ffmpeg (WAV fix/resample/convert)")
 	else
-		vim.health.warn("ffmpeg not found (WAV validation may fail)")
+		vim.health.error("ffmpeg not found (required; install with 'sudo apt install ffmpeg')")
 	end
 
 	if vim.fn.executable("ffprobe") == 1 then
 		vim.health.ok("ffprobe (WAV duration check)")
 	else
 		vim.health.warn("ffprobe not found (part of ffmpeg)")
+	end
+
+	if vim.fn.executable("yt-dlp") == 1 then
+		vim.health.ok("yt-dlp (URL audio download)")
+	else
+		vim.health.warn("yt-dlp not found (required for WhisperURL; install with 'pip install yt-dlp')")
 	end
 
 	vim.health.info("whisper-cli and model path are user-configured — verify after setup()")

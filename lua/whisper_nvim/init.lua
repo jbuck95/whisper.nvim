@@ -13,6 +13,7 @@ M.config = {
 	language = "de",
 	stream_chunk_duration = 5,
 	stream_temp_dir = vim.fn.stdpath("data") .. "/whisper_stream",
+	save_dir = vim.fn.expand("~/Documents/transcriptions"),
 }
 
 -- Setup function for user configuration
@@ -30,6 +31,10 @@ function M.setup(opts)
 	end
 	if vim.fn.executable("ffmpeg") == 0 then
 		vim.notify("ffmpeg is required for WAV file validation. Install it with 'sudo apt install ffmpeg'.", vim.log.levels.WARN)
+	end
+	vim.fn.mkdir(M.config.save_dir, "p")
+	if vim.fn.executable("yt-dlp") == 0 then
+		vim.notify("yt-dlp not found. Install it for URL transcription support.", vim.log.levels.WARN)
 	end
 end
 
@@ -87,6 +92,99 @@ local function fix_wav_file(input_file)
 	vim.fn.delete(input_file)
 	vim.fn.rename(temp_file, input_file)
 	return true, nil
+end
+
+local function run_whisper(wav_path, output_base, callback)
+	local pid = vim.fn.jobstart({
+		M.config.whisper_path,
+		"-m",
+		M.config.model_path,
+		"-f",
+		wav_path,
+		"--output-txt",
+		"--output-file",
+		output_base,
+		"-l",
+		M.config.language,
+	}, {
+		on_exit = function(_, code)
+			if code == 0 then
+				local txt_file = output_base .. ".txt"
+				if vim.fn.filereadable(txt_file) == 0 then
+					callback(nil, "Transcription file not found: " .. txt_file)
+					return
+				end
+				local lines = vim.fn.readfile(txt_file)
+				callback(lines, nil)
+			else
+				callback(nil, "Transcription failed with exit code: " .. code)
+			end
+		end,
+	})
+	if pid <= 0 then
+		callback(nil, "Failed to start whisper-cli")
+		return
+	end
+	vim.defer_fn(function()
+		if vim.fn.jobwait({pid}, 0)[1] == -1 then
+			vim.fn.jobstop(pid)
+			callback(nil, "Transcription timed out after " .. M.config.transcription_timeout .. "ms")
+		end
+	end, M.config.transcription_timeout)
+end
+
+local function convert_to_wav(input_path, output_path, callback)
+	if vim.fn.executable("ffmpeg") == 0 then
+		callback(false, "ffmpeg not installed")
+		return
+	end
+	vim.fn.jobstart({
+		"ffmpeg", "-y", "-i", input_path,
+		"-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
+		output_path,
+	}, {
+		on_exit = function(_, code)
+			if code == 0 then
+				callback(true, nil)
+			else
+				callback(false, "ffmpeg conversion failed with exit code: " .. code)
+			end
+		end,
+	})
+end
+
+local function save_transcription(lines, source_name, metadata)
+	metadata = metadata or {}
+	local dir = M.config.save_dir or M.config.output_dir
+	vim.fn.mkdir(dir, "p")
+	local ts = os.date("%Y%m%d_%H%M%S")
+	local safe_name = source_name:gsub("[\\/:*?\"<>|]", "_"):sub(1, 80)
+	local filename_base = ts .. "_" .. safe_name
+	local filename = dir .. "/" .. filename_base .. ".md"
+
+	local yaml = {
+		"---",
+		"id: " .. filename_base,
+		"aliases: []",
+		"tags: []",
+	}
+	if metadata.title and metadata.title ~= "" then
+		table.insert(yaml, 'title: "' .. metadata.title:gsub('"', '\\"') .. '"')
+	else
+		table.insert(yaml, 'title: ""')
+	end
+	if metadata.url then
+		table.insert(yaml, "url: " .. metadata.url)
+	end
+	table.insert(yaml, "---")
+	table.insert(yaml, "")
+
+	local full_content = vim.list_extend(yaml, lines)
+	vim.fn.writefile(full_content, filename)
+	vim.notify("Transcription saved: " .. filename, vim.log.levels.INFO)
+	vim.schedule(function()
+		vim.cmd("edit " .. vim.fn.fnameescape(filename))
+	end)
 end
 
 -- Start audio recording
@@ -170,47 +268,128 @@ function M.stop_recording()
 	end
 
 	local output_path = M.config.output_dir .. "/" .. M.config.output_file
-	local transcription_pid = vim.fn.jobstart({
-		M.config.whisper_path,
-		"-m",
-		M.config.model_path,
-		"-f",
-		M.config.recording_file,
-		"--output-txt",
-		"--output-file",
-		output_path:match("^(.*)%.md$"),
-		"-l",
-		M.config.language,
-		">", "/dev/null", "2>&1", -- Redirect stdout and stderr to /dev/null
+	local output_base = output_path:match("^(.*)%.md$")
+	run_whisper(M.config.recording_file, output_base, function(lines, err)
+		if err then
+			vim.notify(err, vim.log.levels.ERROR)
+			return
+		end
+		local lines_to_insert = vim.tbl_map(function(line)
+			return line:gsub("^%s+", "")
+		end, lines)
+		local buf = vim.api.nvim_get_current_buf()
+		local cursor = vim.api.nvim_win_get_cursor(0)
+		local row = cursor[1]
+		vim.api.nvim_buf_set_lines(buf, row, row, false, lines_to_insert)
+	end)
+end
+
+function M.transcribe_file(audio_path)
+	audio_path = vim.fn.expand(audio_path)
+	if vim.fn.filereadable(audio_path) == 0 then
+		vim.notify("File not found: " .. audio_path, vim.log.levels.ERROR)
+		return
+	end
+
+	vim.notify("Converting audio file (" .. vim.fn.fnamemodify(audio_path, ":t") .. ")...", vim.log.levels.INFO)
+
+	local temp_wav = vim.fn.tempname() .. ".wav"
+	convert_to_wav(audio_path, temp_wav, function(success, conv_err)
+		if not success then
+			pcall(vim.fn.delete, temp_wav)
+			vim.notify(conv_err, vim.log.levels.ERROR)
+			return
+		end
+
+		vim.notify("Transcribing...", vim.log.levels.INFO)
+
+		local output_base = temp_wav:gsub("%.wav$", "")
+		run_whisper(temp_wav, output_base, function(lines, whisper_err)
+			pcall(vim.fn.delete, temp_wav)
+			pcall(vim.fn.delete, output_base .. ".txt")
+			if whisper_err then
+				vim.notify(whisper_err, vim.log.levels.ERROR)
+				return
+			end
+
+			local source_name = vim.fn.fnamemodify(audio_path, ":t")
+			save_transcription(lines, source_name, { title = source_name })
+		end)
+	end)
+end
+
+function M.transcribe_url(url)
+	if vim.fn.executable("yt-dlp") == 0 then
+		vim.notify("yt-dlp not found. Install it with 'pip install yt-dlp'.", vim.log.levels.ERROR)
+		return
+	end
+
+	local title = "url_transcription"
+	local handle = io.popen("yt-dlp --get-title " .. vim.fn.shellescape(url) .. " 2>/dev/null")
+	if handle then
+		local result = handle:read("*a"):gsub("%s+$", "")
+		handle:close()
+		if result ~= "" then
+			title = result:gsub("\n", " ")
+		end
+	end
+
+	local temp_dir = vim.fn.tempname()
+	vim.fn.mkdir(temp_dir, "p")
+
+	vim.notify("Downloading: " .. title .. "...", vim.log.levels.INFO)
+
+	vim.fn.jobstart({
+		"yt-dlp", "-x", "--audio-format", "wav",
+		"-o", temp_dir .. "/audio.%(ext)s",
+		"--no-playlist",
+		url,
 	}, {
 		on_exit = function(_, code)
-			if code == 0 then
-				local txt_file = output_path:match("^(.*)%.md$") .. ".txt"
-				if vim.fn.filereadable(txt_file) == 0 then
-					vim.notify("Transcription file not found: " .. txt_file, vim.log.levels.ERROR)
+			if code ~= 0 then
+				vim.notify("yt-dlp download failed with exit code: " .. code, vim.log.levels.ERROR)
+				pcall(vim.fn.delete, temp_dir, "rf")
+				return
+			end
+
+			local handle = io.popen("find " .. temp_dir .. " -type f 2>/dev/null | head -1")
+			local downloaded_file = (handle and handle:read("*a") or ""):gsub("%s+$", "")
+			if handle then handle:close() end
+
+			if downloaded_file == "" then
+				vim.notify("No audio file downloaded", vim.log.levels.ERROR)
+				pcall(vim.fn.delete, temp_dir, "rf")
+				return
+			end
+
+			vim.notify("Converting audio...", vim.log.levels.INFO)
+
+			local temp_wav = vim.fn.tempname() .. ".wav"
+			convert_to_wav(downloaded_file, temp_wav, function(success, conv_err)
+				pcall(vim.fn.delete, temp_dir, "rf")
+
+				if not success then
+					pcall(vim.fn.delete, temp_wav)
+					vim.notify(conv_err, vim.log.levels.ERROR)
 					return
 				end
-				local transcription = vim.fn.readfile(txt_file)
-				-- Entferne führende Leerzeichen aus jeder Zeile
-				local lines_to_insert = vim.tbl_map(function(line)
-					return line:gsub("^%s+", "")
-				end, transcription)
-				local buf = vim.api.nvim_get_current_buf()
-				local cursor = vim.api.nvim_win_get_cursor(0)
-				local row = cursor[1]
-				vim.api.nvim_buf_set_lines(buf, row, row, false, lines_to_insert)
-			else
-				vim.notify("Transcription failed with exit code: " .. code, vim.log.levels.ERROR)
-			end
+
+				vim.notify("Transcribing...", vim.log.levels.INFO)
+
+				local output_base = temp_wav:gsub("%.wav$", "")
+				run_whisper(temp_wav, output_base, function(lines, whisper_err)
+					pcall(vim.fn.delete, temp_wav)
+					pcall(vim.fn.delete, output_base .. ".txt")
+					if whisper_err then
+						vim.notify(whisper_err, vim.log.levels.ERROR)
+						return
+					end
+
+					save_transcription(lines, title, { url = url, title = title })
+				end)
+			end)
 		end,
 	})
-
-	vim.defer_fn(function()
-		if vim.fn.jobwait({transcription_pid}, 0)[1] == -1 then
-			vim.fn.jobstop(transcription_pid)
-			vim.notify("Transcription timed out after " .. M.config.transcription_timeout .. "ms", vim.log.levels.ERROR)
-		end
-	end, M.config.transcription_timeout)
 end
 
 -- Stream state
