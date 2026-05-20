@@ -1,97 +1,136 @@
+---@type table<string, any>
 local M = {}
 
--- Default configuration
-M.config = {
-	whisper_path = "/home/jan/own/whisperV/whisper.cpp/build/bin/whisper-cli",
-	model_path = "/home/jan/own/whisperV/whisper.cpp/models/ggml-large-turbo-v3.bin",
-	output_dir = vim.fn.stdpath("data") .. "/whisper_transcriptions",
-	output_file = "transcriptions.md",
-	recording_file = vim.fn.stdpath("config") .. "/lua/dev/whisper_nvim/whisper_recording.wav",
-	audio_device = "default",
-	transcription_timeout = 120000, -- 120 seconds
-	include_timestamp = false,
-	language = "de",
-	stream_chunk_duration = 5,
-	stream_temp_dir = vim.fn.stdpath("data") .. "/whisper_stream",
-	save_dir = vim.fn.expand("~/Documents/transcriptions"),
-}
+---@type whisper_nvim.Config
+M.config = require("whisper_nvim.config.defaults")
 
--- Setup function for user configuration
+---@class whisper_nvim.streaming
+---@field active boolean
+---@field chunk_index number
+---@field current_recording number|nil
+---@field temp_dir string
+---@field pending number
+
+---@param opts? whisper_nvim.Config
 function M.setup(opts)
 	M.config = vim.tbl_deep_extend("force", M.config, opts or {})
+	local ok, valerr = pcall(vim.validate, {
+		whisper_path = { M.config.whisper_path, "string" },
+		model_path = { M.config.model_path, "string" },
+		output_dir = { M.config.output_dir, "string" },
+		output_file = { M.config.output_file, "string" },
+		recording_file = { M.config.recording_file, "string" },
+		audio_device = { M.config.audio_device, "string", true },
+		transcription_timeout = { M.config.transcription_timeout, "number" },
+		include_timestamp = { M.config.include_timestamp, "boolean", true },
+		language = { M.config.language, "string" },
+		stream_chunk_duration = { M.config.stream_chunk_duration, "number" },
+		stream_temp_dir = { M.config.stream_temp_dir, "string" },
+		save_dir = { M.config.save_dir, "string" },
+	})
+	if not ok then
+		vim.notify("Invalid whisper.nvim config: " .. valerr, vim.log.levels.ERROR)
+		return
+	end
+	if M.config.whisper_path ~= "" and vim.fn.executable(M.config.whisper_path) ~= 1 then
+		vim.notify("whisper-cli not executable: " .. M.config.whisper_path, vim.log.levels.ERROR)
+	end
+	if M.config.model_path ~= "" and vim.fn.filereadable(M.config.model_path) ~= 1 then
+		vim.notify("Model file not found: " .. M.config.model_path, vim.log.levels.ERROR)
+	end
 	vim.fn.mkdir(M.config.output_dir, "p")
-	local dir_stat = vim.loop.fs_stat(M.config.output_dir)
-	if not dir_stat or dir_stat.type ~= "directory" or not vim.loop.fs_access(M.config.output_dir, "W") then
-		vim.notify("Output directory is not writable: " .. M.config.output_dir, vim.log.levels.ERROR)
-	end
-	local plugin_dir = vim.fn.stdpath("config") .. "/lua/dev/whisper_nvim"
-	vim.fn.mkdir(plugin_dir, "p")
-	if not vim.loop.fs_access(plugin_dir, "W") then
-		vim.notify("Plugin directory is not writable: " .. plugin_dir, vim.log.levels.ERROR)
-	end
+	vim.fn.mkdir(M.config.stream_temp_dir, "p")
+	vim.fn.mkdir(M.config.save_dir, "p")
 	if vim.fn.executable("ffmpeg") == 0 then
 		vim.notify("ffmpeg is required for WAV file validation. Install it with 'sudo apt install ffmpeg'.", vim.log.levels.WARN)
 	end
-	vim.fn.mkdir(M.config.save_dir, "p")
 	if vim.fn.executable("yt-dlp") == 0 then
 		vim.notify("yt-dlp not found. Install it for URL transcription support.", vim.log.levels.WARN)
 	end
 end
 
--- Check available audio devices
-local function check_audio_devices()
-	local handle = io.popen("arecord -l 2>/dev/null")
-	local result = handle:read("*a")
-	handle:close()
-	if result == "" or result:match("no soundcards found") then
-		return false, "No audio devices found. Run 'arecord -l' to check."
+---@param callback fun(ok: boolean, msg: string)
+local function check_audio_devices(callback)
+	local output = {}
+	local job_id = vim.fn.jobstart({ "arecord", "-l" }, {
+		stdout_buffered = true,
+		stderr_buffered = true,
+		on_stdout = function(_, data)
+			if data then
+				for _, line in ipairs(data) do
+					table.insert(output, line)
+				end
+			end
+		end,
+		on_exit = function()
+			local result = table.concat(output, "\n")
+			if result == "" or result:match("no soundcards") then
+				callback(false, "No audio devices found. Run 'arecord -l' to check.")
+			else
+				callback(true, result)
+			end
+		end,
+	})
+	if job_id <= 0 then
+		callback(false, "Failed to run arecord")
 	end
-	return true, result
 end
 
--- Validate WAV file duration using ffmpeg
-local function get_wav_duration(file)
-	if vim.fn.executable("ffmpeg") == 0 then
-		return nil, "ffmpeg not installed"
+---@param callback fun(duration: number|nil, err: string|nil)
+local function get_wav_duration(file, callback)
+	if vim.fn.executable("ffprobe") == 0 then
+		callback(nil, "ffprobe not installed")
+		return
 	end
-	local cmd = string.format("ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 %s 2>&1", file)
-	local handle = io.popen(cmd)
-	local result = handle:read("*a")
-	handle:close()
-	local duration = tonumber(result)
-	if not duration then
-		return nil, "Failed to read WAV duration: " .. result
-	end
-	return duration, nil
+	local output = {}
+	vim.fn.jobstart({
+		"ffprobe", "-v", "error",
+		"-show_entries", "format=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		file,
+	}, {
+		stdout_buffered = true,
+		on_stdout = function(_, data)
+			if data then
+				for _, line in ipairs(data) do
+					table.insert(output, line)
+				end
+			end
+		end,
+		on_exit = function()
+			local result = table.concat(output, "\n")
+			local duration = tonumber(result)
+			if not duration then
+				callback(nil, "Failed to read WAV duration: " .. result)
+			else
+				callback(duration, nil)
+			end
+		end,
+	})
 end
 
--- Fix WAV file using ffmpeg
-local function fix_wav_file(input_file)
+---@param callback fun(success: boolean, err: string|nil)
+local function fix_wav_file(input_file, callback)
 	if vim.fn.executable("ffmpeg") == 0 then
-		return false, "ffmpeg not installed"
+		callback(false, "ffmpeg not installed")
+		return
 	end
 	local temp_file = input_file .. ".tmp.wav"
-	local cmd = {
-		"ffmpeg",
-		"-y",
-		"-i",
-		input_file,
-		"-ar",
-		"16000",
-		"-ac",
-		"1",
-		"-acodec",
-		"pcm_s16le",
+	vim.fn.jobstart({
+		"ffmpeg", "-y", "-i", input_file,
+		"-ar", "16000", "-ac", "1", "-acodec", "pcm_s16le",
 		temp_file,
-	}
-	local job_id = vim.fn.jobstart(cmd, { stderr_buffered = true, stdout_buffered = true })
-	local result = vim.fn.jobwait({job_id}, 5000)[1]
-	if result ~= 0 then
-		return false, "ffmpeg failed to fix WAV file"
-	end
-	vim.fn.delete(input_file)
-	vim.fn.rename(temp_file, input_file)
-	return true, nil
+	}, {
+		on_exit = function(_, code)
+			if code ~= 0 then
+				callback(false, "ffmpeg failed to fix WAV file")
+				return
+			end
+			vim.fn.delete(input_file)
+			vim.fn.rename(temp_file, input_file)
+			callback(true, nil)
+		end,
+	})
 end
 
 local function run_whisper(wav_path, output_base, callback)
@@ -187,53 +226,94 @@ local function save_transcription(lines, source_name, metadata)
 	end)
 end
 
--- Start audio recording
+-- Start audio recording from microphone
 function M.start_recording()
 	if M.recording_pid then
 		return
 	end
 
-	local devices_ok, devices_msg = check_audio_devices()
-	if not devices_ok then
-		vim.notify(devices_msg, vim.log.levels.ERROR)
-		return
-	end
+	check_audio_devices(function(ok, msg)
+		if not ok then
+			vim.notify(msg, vim.log.levels.ERROR)
+			return
+		end
 
-	if vim.fn.filereadable(M.config.recording_file) == 1 then
-		vim.fn.delete(M.config.recording_file)
-	end
+		if vim.fn.filereadable(M.config.recording_file) == 1 then
+			vim.fn.delete(M.config.recording_file)
+		end
 
-	M.recording_pid = vim.fn.jobstart({
-		"arecord",
-		"-D",
-		M.config.audio_device,
-		"-f",
-		"S16_LE",
-		"-r",
-		"16000",
-		"-c",
-		"1",
-		M.config.recording_file,
-	}, {
-		stderr_buffered = true,
+		M.recording_pid = vim.fn.jobstart({
+			"arecord",
+			"-D", M.config.audio_device,
+			"-f", "S16_LE",
+			"-r", "16000",
+			"-c", "1",
+			M.config.recording_file,
+		}, {
+			stderr_buffered = true,
 		on_stderr = function(_, data)
-			if data[1] then
+			if data[1] and not M._recording_on_exit then
 				vim.notify("Recording error: " .. table.concat(data, "\n"), vim.log.levels.ERROR)
 			end
 		end,
 		on_exit = function(_, code)
-			if code ~= 0 then
+			local exit_cb = M._recording_on_exit
+			M._recording_on_exit = nil
+			M.recording_pid = nil
+			if not exit_cb and code ~= 0 then
 				vim.notify("Recording failed with exit code: " .. code, vim.log.levels.ERROR)
 			end
-			M.recording_pid = nil
+			if exit_cb then
+				exit_cb()
+			end
 		end,
-	})
+		})
 
-	if M.recording_pid <= 0 then
-		vim.notify("Failed to start recording. Check audio device or permissions.", vim.log.levels.ERROR)
-		M.recording_pid = nil
+		if M.recording_pid <= 0 then
+			vim.notify("Failed to start recording. Check audio device or permissions.", vim.log.levels.ERROR)
+			M.recording_pid = nil
+		end
+	end)
+end
+
+local function post_record_transcribe()
+	local file_stat = vim.loop.fs_stat(M.config.recording_file)
+	if not file_stat or file_stat.size < 44 then
+		vim.notify("Recording file invalid or too small: " .. M.config.recording_file, vim.log.levels.ERROR)
 		return
 	end
+
+	get_wav_duration(M.config.recording_file, function(duration, err)
+		if not duration then
+			vim.notify("WAV validation failed: " .. err, vim.log.levels.ERROR)
+			return
+		elseif duration > 300 then
+			vim.notify("WAV file duration too long (" .. duration .. "s). Possible corruption.", vim.log.levels.ERROR)
+			return
+		end
+
+		fix_wav_file(M.config.recording_file, function(success, fix_err)
+			if not success then
+				vim.notify("Failed to fix WAV file: " .. fix_err, vim.log.levels.ERROR)
+				return
+			end
+
+			local output_path = M.config.output_dir .. "/" .. M.config.output_file
+			local output_base = output_path:match("^(.*)%.md$")
+			run_whisper(M.config.recording_file, output_base, function(lines, whisper_err)
+				if whisper_err then
+					vim.notify(whisper_err, vim.log.levels.ERROR)
+					return
+				end
+				local lines_to_insert = vim.tbl_map(function(line)
+					return line:gsub("^%s+", "")
+				end, lines)
+				local buf = vim.api.nvim_get_current_buf()
+				local cursor = vim.api.nvim_win_get_cursor(0)
+				vim.api.nvim_buf_set_lines(buf, cursor[1], cursor[1], false, lines_to_insert)
+			end)
+		end)
+	end)
 end
 
 -- Stop recording and transcribe
@@ -242,48 +322,11 @@ function M.stop_recording()
 		return
 	end
 
-	vim.fn.system({"kill", "-SIGINT", M.recording_pid})
-	vim.loop.sleep(2000)
-	M.recording_pid = nil
-
-	local file_stat = vim.loop.fs_stat(M.config.recording_file)
-	if not file_stat or file_stat.size < 44 then
-		vim.notify("Recording file invalid or too small: " .. M.config.recording_file, vim.log.levels.ERROR)
-		return
-	end
-
-	local duration, err = get_wav_duration(M.config.recording_file)
-	if not duration then
-		vim.notify("WAV validation failed: " .. err, vim.log.levels.ERROR)
-		return
-	elseif duration > 300 then
-		vim.notify("WAV file duration too long (" .. duration .. "s). Possible corruption.", vim.log.levels.ERROR)
-		return
-	end
-
-	local success, fix_err = fix_wav_file(M.config.recording_file)
-	if not success then
-		vim.notify("Failed to fix WAV file: " .. fix_err, vim.log.levels.ERROR)
-		return
-	end
-
-	local output_path = M.config.output_dir .. "/" .. M.config.output_file
-	local output_base = output_path:match("^(.*)%.md$")
-	run_whisper(M.config.recording_file, output_base, function(lines, err)
-		if err then
-			vim.notify(err, vim.log.levels.ERROR)
-			return
-		end
-		local lines_to_insert = vim.tbl_map(function(line)
-			return line:gsub("^%s+", "")
-		end, lines)
-		local buf = vim.api.nvim_get_current_buf()
-		local cursor = vim.api.nvim_win_get_cursor(0)
-		local row = cursor[1]
-		vim.api.nvim_buf_set_lines(buf, row, row, false, lines_to_insert)
-	end)
+	M._recording_on_exit = post_record_transcribe
+	vim.fn.jobstop(M.recording_pid)
 end
 
+---@param audio_path string Path to an audio file
 function M.transcribe_file(audio_path)
 	audio_path = vim.fn.expand(audio_path)
 	if vim.fn.filereadable(audio_path) == 0 then
@@ -318,6 +361,7 @@ function M.transcribe_file(audio_path)
 	end)
 end
 
+---@param url string URL of an audio/video resource (yt-dlp compatible)
 function M.transcribe_url(url)
 	if vim.fn.executable("yt-dlp") == 0 then
 		vim.notify("yt-dlp not found. Install it with 'pip install yt-dlp'.", vim.log.levels.ERROR)
@@ -325,13 +369,11 @@ function M.transcribe_url(url)
 	end
 
 	local title = "url_transcription"
-	local handle = io.popen("yt-dlp --get-title " .. vim.fn.shellescape(url) .. " 2>/dev/null")
-	if handle then
-		local result = handle:read("*a"):gsub("%s+$", "")
-		handle:close()
-		if result ~= "" then
-			title = result:gsub("\n", " ")
-		end
+	local title_result = vim.fn.systemlist(
+		"yt-dlp --get-title " .. vim.fn.shellescape(url) .. " 2>/dev/null"
+	)
+	if type(title_result) == "table" and #title_result > 0 and title_result[1] ~= "" then
+		title = title_result[1]:gsub("\n", " ")
 	end
 
 	local temp_dir = vim.fn.tempname()
@@ -352,9 +394,11 @@ function M.transcribe_url(url)
 				return
 			end
 
-			local handle = io.popen("find " .. temp_dir .. " -type f 2>/dev/null | head -1")
-			local downloaded_file = (handle and handle:read("*a") or ""):gsub("%s+$", "")
-			if handle then handle:close() end
+			local find_result = vim.fn.systemlist("find " .. temp_dir .. " -type f 2>/dev/null")
+			local downloaded_file = ""
+			if type(find_result) == "table" and #find_result > 0 then
+				downloaded_file = find_result[1]:gsub("%s+$", "")
+			end
 
 			if downloaded_file == "" then
 				vim.notify("No audio file downloaded", vim.log.levels.ERROR)
@@ -393,6 +437,7 @@ function M.transcribe_url(url)
 end
 
 -- Stream state
+---@type whisper_nvim.streaming
 M.streaming = {}
 
 -- Forward declarations for mutual recursion
@@ -409,29 +454,29 @@ function M.start_streaming()
 		return
 	end
 
-	local devices_ok, devices_msg = check_audio_devices()
-	if not devices_ok then
-		vim.notify(devices_msg, vim.log.levels.ERROR)
-		return
-	end
+	check_audio_devices(function(ok, msg)
+		if not ok then
+			vim.notify(msg, vim.log.levels.ERROR)
+			return
+		end
 
-	local temp_dir = M.config.stream_temp_dir
-	-- Clean up previous session
-	if M.streaming.temp_dir and vim.loop.fs_stat(M.streaming.temp_dir) then
-		vim.fn.delete(M.streaming.temp_dir, "rf")
-	end
-	vim.fn.mkdir(temp_dir, "p")
+		local temp_dir = M.config.stream_temp_dir
+		if M.streaming.temp_dir and vim.loop.fs_stat(M.streaming.temp_dir) then
+			vim.fn.delete(M.streaming.temp_dir, "rf")
+		end
+		vim.fn.mkdir(temp_dir, "p")
 
-	M.streaming = {
-		active = true,
-		chunk_index = 0,
-		current_recording = nil,
-		temp_dir = temp_dir,
-		pending = 0,
-	}
+		M.streaming = {
+			active = true,
+			chunk_index = 0,
+			current_recording = nil,
+			temp_dir = temp_dir,
+			pending = 0,
+		}
 
-	vim.notify("Streaming started (chunk: " .. M.config.stream_chunk_duration .. "s)")
-	record_chunk()
+		vim.notify("Streaming started (chunk: " .. M.config.stream_chunk_duration .. "s)")
+		record_chunk()
+	end)
 end
 
 -- Stop streaming mode (toggle off)

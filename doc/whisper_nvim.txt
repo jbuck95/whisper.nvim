@@ -1,0 +1,130 @@
+*whisper_nvim.txt*	Local whisper.cpp voice transcription
+
+==============================================================================
+INTRODUCTION					*whisper_nvim-intro*
+
+whisper.nvim transcribes speech-to-text using whisper.cpp, running entirely
+offline on your local CPU. No data leaves your machine.
+
+Features:
+- Voice recording via ALSA (`arecord`)
+- Streaming mode: continuous real-time transcription
+- File transcription: transcribe any audio/video file
+- URL transcription: download + transcribe via yt-dlp
+- Output as Markdown files with YAML frontmatter
+- Healthcheck via `:checkhealth whisper_nvim`
+
+Dependencies:
+- `arecord` (alsa-utils) — audio capture
+- `ffmpeg` / `ffprobe` — audio processing and validation
+- `whisper-cli` binary + GGML model file (user-configured)
+- `yt-dlp` — optional, for URL transcription
+
+==============================================================================
+INSTALLATION					*whisper_nvim-install*
+
+Using lazy.nvim:					*lazy.nvim*
+
+>lua
+  return {
+    "jbuck95/whisper.nvim", -- or local: dir = "...",
+    config = function()
+      require("whisper_nvim").setup({
+        whisper_path = "/path/to/whisper-cli",
+        model_path   = "/path/to/ggml-large-v3-turbo.bin",
+      })
+    end,
+  }
+<
+
+==============================================================================
+SETUP						*whisper_nvim-setup*
+
+						*whisper_nvim.setup()*
+`setup({opts})`
+  Merges user configuration with defaults and initializes the plugin.
+  All keys are optional — defaults are provided but <whisper_path> and
+  <model_path> must be set to valid values.
+
+						*whisper_nvim-config*
+                                         *whisper_nvim.Config*
+Configuration fields:
+  whisper_path     (string)  Path to whisper-cli binary
+  model_path       (string)  Path to GGML model file (.bin)
+  output_dir       (string)  Directory for transcription output (default: stdpath("data") .. "/whisper_transcriptions")
+  output_file      (string)  Filename for markdown transcriptions (default: "transcriptions.md")
+  recording_file   (string)  Path for temporary WAV recording (default: stdpath("data") .. "/whisper_recording.wav")
+  audio_device     (string)  ALSA audio device name (default: "default")
+  transcription_timeout (number)  Timeout in ms (default: 120000)
+  include_timestamp (boolean) Include timestamps (default: false)
+  language         (string)  Language code, e.g. "de" or "en" (default: "de")
+  stream_chunk_duration (number)  Chunk length in seconds (default: 5)
+  stream_temp_dir  (string)  Directory for streaming chunks
+  save_dir         (string)  Directory for saved transcriptions (default: "~/Documents/transcriptions")
+
+==============================================================================
+COMMANDS					*whisper_nvim-commands*
+
+All features are accessible through a single scoped command:
+
+:Whisper {subcommand} [args]		*:Whisper*
+
+Subcommands:
+  start    Start microphone recording
+  stop     Stop recording, validate WAV, transcribe, insert at cursor
+  stream   Toggle streaming mode (continuous real-time transcription)
+  file     Transcribe an audio file (prompts for path if not given)
+  url      Transcribe from a URL via yt-dlp (prompts for URL if not given)
+
+Examples:
+  :Whisper start
+  :Whisper stop
+  :Whisper stream
+  :Whisper file ~/audio/lecture.mp3
+  :Whisper url https://www.youtube.com/watch?v=...
+
+==============================================================================
+MAPPINGS					*whisper_nvim-mappings*
+
+whisper.nvim provides <Plug> mappings. Users define their own keybindings:
+
+					*<Plug>(whisper-start)*
+<Plug>(whisper-start)	Start microphone recording
+
+					*<Plug>(whisper-stop)*
+<Plug>(whisper-stop)	Stop recording and transcribe
+
+					*<Plug>(whisper-stream)*
+<Plug>(whisper-stream)	Toggle streaming mode
+
+					*<Plug>(whisper-file)*
+<Plug>(whisper-file)	Prompt for audio file path and transcribe
+
+					*<Plug>(whisper-url)*
+<Plug>(whisper-url)	Prompt for URL and transcribe via yt-dlp
+
+Example configuration (add to your keymap config):
+>lua
+  vim.keymap.set("n", "<leader>ws", "<Plug>(whisper-start)")
+  vim.keymap.set("n", "<leader>wx", "<Plug>(whisper-stop)")
+  vim.keymap.set("n", "<leader>wt", "<Plug>(whisper-stream)")
+  vim.keymap.set("n", "<leader>wf", "<Plug>(whisper-file)")
+  vim.keymap.set("n", "<leader>wu", "<Plug>(whisper-url)")
+<
+
+==============================================================================
+HEALTH						*whisper_nvim-health*
+
+Run `:checkhealth whisper_nvim` to verify:
+- System dependencies (arecord, ffmpeg, ffprobe, yt-dlp)
+- Audio capture device availability
+- whisper-cli binary path and executability
+- Model file path, existence and size
+- Configured directories and language
+
+==============================================================================
+LICENSE						*whisper_nvim-license*
+
+MIT License. See LICENSE file.
+
+ vim:tw=78:ts=8:ft=help:norl:
