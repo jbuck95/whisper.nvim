@@ -14,20 +14,20 @@ M.config = require("whisper_nvim.config.defaults")
 ---@param opts? whisper_nvim.Config
 function M.setup(opts)
 	M.config = vim.tbl_deep_extend("force", M.config, opts or {})
-	local ok, valerr = pcall(vim.validate, {
-		whisper_path = { M.config.whisper_path, "string" },
-		model_path = { M.config.model_path, "string" },
-		output_dir = { M.config.output_dir, "string" },
-		output_file = { M.config.output_file, "string" },
-		recording_file = { M.config.recording_file, "string" },
-		audio_device = { M.config.audio_device, "string", true },
-		transcription_timeout = { M.config.transcription_timeout, "number" },
-		include_timestamp = { M.config.include_timestamp, "boolean", true },
-		language = { M.config.language, "string" },
-		stream_chunk_duration = { M.config.stream_chunk_duration, "number" },
-		stream_temp_dir = { M.config.stream_temp_dir, "string" },
-		save_dir = { M.config.save_dir, "string" },
-	})
+	local ok, valerr = pcall(function()
+		vim.validate("whisper_path", M.config.whisper_path, "string")
+		vim.validate("model_path", M.config.model_path, "string")
+		vim.validate("output_dir", M.config.output_dir, "string")
+		vim.validate("output_file", M.config.output_file, "string")
+		vim.validate("recording_file", M.config.recording_file, "string")
+		vim.validate("audio_device", M.config.audio_device, "string", true)
+		vim.validate("transcription_timeout", M.config.transcription_timeout, "number")
+		vim.validate("include_timestamp", M.config.include_timestamp, "boolean", true)
+		vim.validate("language", M.config.language, "string")
+		vim.validate("stream_chunk_duration", M.config.stream_chunk_duration, "number")
+		vim.validate("stream_temp_dir", M.config.stream_temp_dir, "string")
+		vim.validate("save_dir", M.config.save_dir, "string")
+	end)
 	if not ok then
 		vim.notify("Invalid whisper.nvim config: " .. valerr, vim.log.levels.ERROR)
 		return
