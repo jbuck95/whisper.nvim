@@ -1,18 +1,20 @@
 # whisper.nvim
 
-**DEMO**
-
-![Demo](<insert-video-link>)
-
 ## Description
 
-Local whisper.cpp voice transcription.
+Fully local whisper.cpp voice + audio transcription.
+
+**transbribe:** 
+
+- input from your mic (chunk / streaming)
+- local audio files
+- from url 
 
 ## Requirements
 
 - `arecord` (alsa-utils) -- audio capture
 - `ffmpeg` / `ffprobe` -- audio processing
-- `whisper-cli` binary + GGML model file (user-configured)
+- `whisper.cpp` binary (`whisper-cli` or `main` from `$PATH`) + GGML model file
 - `yt-dlp` -- optional, for URL transcription
 
 Verify: `:checkhealth whisper_nvim`  |  Help: `:help whisper_nvim`
@@ -24,12 +26,13 @@ return {
     "jbuck95/whisper.nvim",
     config = function()
         require("whisper_nvim").setup({
-            whisper_path = "/path/to/whisper-cli",
             model_path = "/path/to/ggml-large-v3-turbo.bin",
         })
     end,
 }
 ```
+
+`whisper_path` is optional — the plugin auto-detects `whisper-cli` or `main` (whisper.cpp build default) from your `$PATH`.
 
 ## Usage
 
@@ -43,7 +46,7 @@ return {
 
 ## Keymaps
 
-`<Plug>` mappings are provided. Add to your keymap config:
+`<Plug>` mappings:
 
 ```lua
 vim.keymap.set("n", "<leader>ws", "<Plug>(whisper-start)")
@@ -58,9 +61,8 @@ vim.keymap.set("n", "<leader>wu", "<Plug>(whisper-url)")
 ```lua
 local w = require("whisper_nvim")
 
--- Setup (required: whisper_path + model_path)
+-- Setup (required: model_path; whisper_path auto-detected)
 w.setup({
-  whisper_path = "/path/to/whisper-cli",
   model_path   = "/path/to/ggml-large-v3-turbo.bin",
 })
 
@@ -83,7 +85,7 @@ All fields can be passed to `setup()`:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `whisper_path` | `""` | Path to `whisper-cli` binary |
+| `whisper_path` | `""` | Path to whisper.cpp binary (auto-detects `whisper-cli` / `main` from `$PATH` if empty) |
 | `model_path` | `""` | Path to GGML model file |
 | `output_dir` | `stdpath("data")/whisper_transcriptions` | Transcription output |
 | `output_file` | `transcriptions.md` | Output filename |
@@ -98,6 +100,11 @@ All fields can be passed to `setup()`:
 ## Credits
 
 Built on [whisper.cpp](https://github.com/ggerganov/whisper.cpp) by Georgi Gerganov.
+
+## Disclaimer
+
+Built for my personal master's thesis workflow.
+AI was used extensively in development.
 
 ## License
 

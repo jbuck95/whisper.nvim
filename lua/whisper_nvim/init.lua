@@ -14,6 +14,14 @@ M.config = require("whisper_nvim.config.defaults")
 ---@param opts? whisper_nvim.Config
 function M.setup(opts)
 	M.config = vim.tbl_deep_extend("force", M.config, opts or {})
+	if M.config.whisper_path == "" then
+		for _, name in ipairs({ "whisper-cli", "main" }) do
+			if vim.fn.executable(name) == 1 then
+				M.config.whisper_path = name
+				break
+			end
+		end
+	end
 	local ok, valerr = pcall(function()
 		vim.validate("whisper_path", M.config.whisper_path, "string")
 		vim.validate("model_path", M.config.model_path, "string")

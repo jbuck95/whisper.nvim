@@ -47,12 +47,12 @@ function M.check()
 
 	if cfg.whisper_path and cfg.whisper_path ~= "" then
 		if vim.fn.executable(cfg.whisper_path) == 1 then
-			vim.health.ok("whisper-cli executable: " .. cfg.whisper_path)
+			vim.health.ok("whisper binary: " .. cfg.whisper_path)
 		else
-			vim.health.error("whisper-cli not executable: " .. cfg.whisper_path)
+			vim.health.error("whisper binary not executable: " .. cfg.whisper_path)
 		end
 	else
-		vim.health.warn("whisper_path is not configured")
+		vim.health.warn("whisper binary not found (auto-detect tried whisper-cli, main)")
 	end
 
 	if cfg.model_path and cfg.model_path ~= "" then
