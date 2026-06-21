@@ -12,8 +12,7 @@ Fully local whisper.cpp voice + audio transcription.
 
 ## Requirements
 
-- `arecord` (alsa-utils) -- audio capture
-- `ffmpeg` / `ffprobe` -- audio processing
+- `ffmpeg` / `ffprobe` -- audio capture + processing
 - `whisper.cpp` binary (e.g. `build/bin/whisper-cli` after `make`) + GGML model file
 - `yt-dlp` -- optional, for URL transcription
 

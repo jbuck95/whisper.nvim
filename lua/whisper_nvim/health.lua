@@ -4,23 +4,23 @@ function M.check()
 	vim.health.start("whisper.nvim")
 
 	-- System dependencies
-	if vim.fn.executable("arecord") == 1 then
-		vim.health.ok("arecord (ALSA recording)")
-	else
-		vim.health.error("arecord not found (required; install alsa-utils)")
-	end
-
-	local handle = io.popen("arecord -l 2>/dev/null")
-	local result = handle and handle:read("*a") or ""
-	if handle then handle:close() end
-	if result == "" or result:match("no soundcards found") then
-		vim.health.warn("no audio capture devices found")
-	else
-		vim.health.ok("audio capture device detected")
-	end
-
 	if vim.fn.executable("ffmpeg") == 1 then
-		vim.health.ok("ffmpeg (WAV fix/resample/convert)")
+		vim.health.ok("ffmpeg (audio capture + processing)")
+		local handle = io.popen("ffmpeg -f alsa -list_devices true -i '' -t 1 2>&1")
+		local result = handle and handle:read("*a") or ""
+		if handle then handle:close() end
+		local devices = {}
+		for line in result:gmatch("[^\n]+") do
+			local name = line:match('"([^"]+)"')
+			if name then
+				table.insert(devices, name)
+			end
+		end
+		if #devices > 0 then
+			vim.health.ok("audio capture devices: " .. table.concat(devices, ", "))
+		else
+			vim.health.warn("no audio capture devices detected (check your ALSA/PulseAudio config)")
+		end
 	else
 		vim.health.error("ffmpeg not found (required; install with 'sudo apt install ffmpeg')")
 	end

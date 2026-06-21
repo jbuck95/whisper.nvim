@@ -7,7 +7,7 @@ whisper.nvim transcribes speech-to-text using whisper.cpp, running entirely
 offline on your local CPU. No data leaves your machine.
 
 Features:
-- Voice recording via ALSA (`arecord`)
+- Voice recording via `ffmpeg`
 - Streaming mode: continuous real-time transcription
 - File transcription: transcribe any audio/video file
 - URL transcription: download + transcribe via yt-dlp
@@ -15,8 +15,7 @@ Features:
 - Healthcheck via `:checkhealth whisper_nvim`
 
 Dependencies:
-- `arecord` (alsa-utils) — audio capture
-- `ffmpeg` / `ffprobe` — audio processing and validation
+- `ffmpeg` / `ffprobe` — audio capture, processing and validation
 - `whisper-cli` binary + GGML model file (user-configured)
 - `yt-dlp` — optional, for URL transcription
 
@@ -116,7 +115,7 @@ Example configuration (add to your keymap config):
 HEALTH						*whisper_nvim-health*
 
 Run `:checkhealth whisper_nvim` to verify:
-- System dependencies (arecord, ffmpeg, ffprobe, yt-dlp)
+- System dependencies (ffmpeg, ffprobe, yt-dlp)
 - Audio capture device availability
 - whisper-cli binary path and executability
 - Model file path, existence and size

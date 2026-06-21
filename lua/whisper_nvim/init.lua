@@ -50,7 +50,7 @@ function M.setup(opts)
 	vim.fn.mkdir(M.config.stream_temp_dir, "p")
 	vim.fn.mkdir(M.config.save_dir, "p")
 	if vim.fn.executable("ffmpeg") == 0 then
-		vim.notify("ffmpeg is required for WAV file validation. Install it with 'sudo apt install ffmpeg'.", vim.log.levels.WARN)
+		vim.notify("ffmpeg is required for audio capture and processing. Install it with 'sudo apt install ffmpeg'.", vim.log.levels.WARN)
 	end
 	if vim.fn.executable("yt-dlp") == 0 then
 		vim.notify("yt-dlp not found. Install it for URL transcription support.", vim.log.levels.WARN)
@@ -59,29 +59,11 @@ end
 
 ---@param callback fun(ok: boolean, msg: string)
 local function check_audio_devices(callback)
-	local output = {}
-	local job_id = vim.fn.jobstart({ "arecord", "-l" }, {
-		stdout_buffered = true,
-		stderr_buffered = true,
-		on_stdout = function(_, data)
-			if data then
-				for _, line in ipairs(data) do
-					table.insert(output, line)
-				end
-			end
-		end,
-		on_exit = function()
-			local result = table.concat(output, "\n")
-			if result == "" or result:match("no soundcards") then
-				callback(false, "No audio devices found. Run 'arecord -l' to check.")
-			else
-				callback(true, result)
-			end
-		end,
-	})
-	if job_id <= 0 then
-		callback(false, "Failed to run arecord")
+	if vim.fn.executable("ffmpeg") == 0 then
+		callback(false, "ffmpeg not installed (required for audio capture)")
+		return
 	end
+	callback(true, nil)
 end
 
 ---@param callback fun(duration: number|nil, err: string|nil)
@@ -251,11 +233,12 @@ function M.start_recording()
 		end
 
 		M.recording_pid = vim.fn.jobstart({
-			"arecord",
-			"-D", M.config.audio_device,
-			"-f", "S16_LE",
-			"-r", "16000",
-			"-c", "1",
+			"ffmpeg", "-y",
+			"-f", "alsa",
+			"-i", M.config.audio_device,
+			"-ar", "16000",
+			"-ac", "1",
+			"-c:a", "pcm_s16le",
 			M.config.recording_file,
 		}, {
 			stderr_buffered = true,
@@ -515,12 +498,13 @@ record_chunk = function()
 	M.streaming.chunk_index = index + 1
 
 	M.streaming.current_recording = vim.fn.jobstart({
-		"arecord",
-		"-D", M.config.audio_device,
-		"-f", "S16_LE",
-		"-r", "16000",
-		"-c", "1",
-		"-d", tostring(M.config.stream_chunk_duration),
+		"ffmpeg", "-y",
+		"-f", "alsa",
+		"-i", M.config.audio_device,
+		"-ar", "16000",
+		"-ac", "1",
+		"-c:a", "pcm_s16le",
+		"-t", tostring(M.config.stream_chunk_duration),
 		chunk_file,
 	}, {
 		on_exit = function(_, code)
