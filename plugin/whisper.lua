@@ -8,13 +8,9 @@ local function get_whisper()
 end
 
 -- <Plug> mappings -- users map these in their own config
-vim.keymap.set("n", "<Plug>(whisper-start)", function()
-	get_whisper().start_recording()
-end, { silent = true, desc = "Whisper: Start recording" })
-
-vim.keymap.set("n", "<Plug>(whisper-stop)", function()
-	get_whisper().stop_recording()
-end, { silent = true, desc = "Whisper: Stop recording and transcribe" })
+vim.keymap.set("n", "<Plug>(whisper-toggle-rec)", function()
+	get_whisper().toggle_recording()
+end, { silent = true, desc = "Whisper: Toggle recording" })
 
 vim.keymap.set("n", "<Plug>(whisper-stream)", function()
 	local m = get_whisper()
@@ -39,19 +35,17 @@ vim.keymap.set("n", "<Plug>(whisper-url)", function()
 	end
 end, { silent = true, desc = "Whisper: Transcribe URL" })
 
--- :Whisper {start|stop|stream|file|url}
+-- :Whisper {rec|stream|file|url}
 vim.api.nvim_create_user_command("Whisper", function(opts)
 	local m = get_whisper()
 	local args = vim.split(opts.args, "%s+", { plain = true, trimempty = true })
 	local sub = args[1]
 	if not sub or sub == "" then
-		vim.notify("Usage: :Whisper {start|stop|stream|file|url}", vim.log.levels.WARN)
+		vim.notify("Usage: :Whisper {rec|stream|file|url}", vim.log.levels.WARN)
 		return
 	end
-	if sub == "start" then
-		m.start_recording()
-	elseif sub == "stop" then
-		m.stop_recording()
+	if sub == "rec" then
+		m.toggle_recording()
 	elseif sub == "stream" then
 		if m.streaming and m.streaming.active then
 			m.stop_streaming()
@@ -84,7 +78,7 @@ end, {
 		if #cmd_args <= 2 then
 			return vim.tbl_filter(function(v)
 				return v:match("^" .. vim.pesc(arg_lead))
-			end, { "start", "stop", "stream", "file", "url" })
+			end, { "rec", "stream", "file", "url" })
 		end
 		return {}
 	end,

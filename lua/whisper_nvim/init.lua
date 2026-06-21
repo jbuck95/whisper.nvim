@@ -279,6 +279,15 @@ local function save_transcription(lines, source_name, metadata)
 	end)
 end
 
+-- Toggle recording on/off
+function M.toggle_recording()
+	if M.recording_pid then
+		M.stop_recording()
+	else
+		M.start_recording()
+	end
+end
+
 -- Start audio recording from microphone
 function M.start_recording()
 	if M.recording_pid then

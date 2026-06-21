@@ -45,8 +45,7 @@ whisper.cpp and or download models. Highly recommend you build for gpu.
 
 | Command | Action |
 |---------|--------|
-| `:Whisper start` | Start microphone recording |
-| `:Whisper stop` | Stop recording, transcribe, insert at cursor |
+| `:Whisper rec` | Toggle microphone recording (start/stop + transcribe) |
 | `:Whisper stream` | Toggle continuous streaming mode |
 | `:Whisper file [path]` | Transcribe an audio file |
 | `:Whisper url <url>` | Download + transcribe from URL (yt-dlp) |
@@ -56,8 +55,7 @@ whisper.cpp and or download models. Highly recommend you build for gpu.
 `<Plug>` mappings:
 
 ```lua
-vim.keymap.set("n", "<leader>ws", "<Plug>(whisper-start)")
-vim.keymap.set("n", "<leader>wx", "<Plug>(whisper-stop)")
+vim.keymap.set("n", "<leader>wr", "<Plug>(whisper-toggle-rec)")
 vim.keymap.set("n", "<leader>wt", "<Plug>(whisper-stream)")
 vim.keymap.set("n", "<leader>wf", "<Plug>(whisper-file)")
 vim.keymap.set("n", "<leader>wu", "<Plug>(whisper-url)")
