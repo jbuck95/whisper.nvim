@@ -4,6 +4,67 @@ local M = {}
 ---@type whisper_nvim.Config
 M.config = require("whisper_nvim.config.defaults")
 
+local drivers = {
+	linux = {
+		name = "alsa",
+		fmt = "alsa",
+		default_device = "default",
+		wrap_input = function(d) return d end,
+		list_cmd = { "ffmpeg", "-hide_banner", "-sources", "alsa" },
+		list_skip = { null = true, lavrate = true, samplerate = true, speexrate = true, jack = true, oss = true, speex = true, upmix = true, vdownmix = true },
+	},
+	macos = {
+		name = "avfoundation",
+		fmt = "avfoundation",
+		default_device = "default",
+		wrap_input = function(d) return ":" .. d end,
+		list_cmd = { "ffmpeg", "-hide_banner", "-list_devices", "true", "-f", "avfoundation", "-i", "''" },
+		list_skip = {},
+	},
+	windows = {
+		name = "dshow",
+		fmt = "dshow",
+		default_device = "default",
+		wrap_input = function(d) return 'audio="' .. d .. '"' end,
+		list_cmd = { "ffmpeg", "-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy" },
+		list_skip = {},
+	},
+}
+
+local function detect_os()
+	local s = vim.loop.os_uname().sysname
+	if s == "Darwin" then return "macos" end
+	if s == "Windows_NT" then return "windows" end
+	return "linux"
+end
+
+local function resolve_driver(cfg)
+	if cfg.audio_driver and cfg.audio_driver ~= "" then
+		if drivers[cfg.audio_driver] then
+			return drivers[cfg.audio_driver]
+		end
+		vim.notify("Unknown audio_driver '" .. cfg.audio_driver .. "', falling back to auto-detect", vim.log.levels.WARN)
+	end
+	return drivers[detect_os()]
+end
+
+local function ffmpeg_capture_args(drv, device, output, duration_sec)
+	local args = {
+		"ffmpeg", "-y",
+		"-f", drv.fmt,
+		"-i", drv.wrap_input(device == "" and drv.default_device or device),
+		"-ar", "16000",
+		"-ac", "1",
+		"-c:a", "pcm_s16le",
+	}
+	if duration_sec then
+		table.insert(args, "-t")
+		table.insert(args, tostring(duration_sec))
+	end
+	table.insert(args, output)
+	return args
+end
+
 ---@class whisper_nvim.streaming
 ---@field active boolean
 ---@field chunk_index number
@@ -22,12 +83,14 @@ function M.setup(opts)
 			end
 		end
 	end
+	M._driver = resolve_driver(M.config)
 	local ok, valerr = pcall(function()
 		vim.validate("whisper_path", M.config.whisper_path, "string")
 		vim.validate("model_path", M.config.model_path, "string")
 		vim.validate("output_dir", M.config.output_dir, "string")
 		vim.validate("output_file", M.config.output_file, "string")
 		vim.validate("recording_file", M.config.recording_file, "string")
+		vim.validate("audio_driver", M.config.audio_driver, "string", true)
 		vim.validate("audio_device", M.config.audio_device, "string", true)
 		vim.validate("transcription_timeout", M.config.transcription_timeout, "number")
 		vim.validate("include_timestamp", M.config.include_timestamp, "boolean", true)
@@ -232,15 +295,7 @@ function M.start_recording()
 			vim.fn.delete(M.config.recording_file)
 		end
 
-		M.recording_pid = vim.fn.jobstart({
-			"ffmpeg", "-y",
-			"-f", "alsa",
-			"-i", M.config.audio_device,
-			"-ar", "16000",
-			"-ac", "1",
-			"-c:a", "pcm_s16le",
-			M.config.recording_file,
-		}, {
+		M.recording_pid = vim.fn.jobstart(ffmpeg_capture_args(M._driver, M.config.audio_device, M.config.recording_file), {
 			stderr_buffered = true,
 		on_stderr = function(_, data)
 			if data[1] and not M._recording_on_exit then
@@ -497,16 +552,7 @@ record_chunk = function()
 	local chunk_file = M.streaming.temp_dir .. "/chunk_" .. string.format("%04d", index) .. ".wav"
 	M.streaming.chunk_index = index + 1
 
-	M.streaming.current_recording = vim.fn.jobstart({
-		"ffmpeg", "-y",
-		"-f", "alsa",
-		"-i", M.config.audio_device,
-		"-ar", "16000",
-		"-ac", "1",
-		"-c:a", "pcm_s16le",
-		"-t", tostring(M.config.stream_chunk_duration),
-		chunk_file,
-	}, {
+	M.streaming.current_recording = vim.fn.jobstart(ffmpeg_capture_args(M._driver, M.config.audio_device, chunk_file, M.config.stream_chunk_duration), {
 		on_exit = function(_, code)
 			M.streaming.current_recording = nil
 			if code == 0 then

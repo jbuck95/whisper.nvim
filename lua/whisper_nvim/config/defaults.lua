@@ -4,7 +4,8 @@
 ---@field output_dir string Directory for transcription output files
 ---@field output_file string Filename for markdown transcriptions
 ---@field recording_file string Path for temporary WAV recording
----@field audio_device? string ALSA audio device name (default: "default")
+---@field audio_driver? string Audio capture driver (empty = auto-detect: alsa/avfoundation/dshow)
+---@field audio_device? string Audio device name (default: "default")
 ---@field transcription_timeout? number Timeout in ms for transcription jobs
 ---@field include_timestamp? boolean Include timestamps in transcription output
 ---@field language? string Language code (e.g. "de", "en")
@@ -17,6 +18,7 @@ return {
 	output_dir = vim.fn.stdpath("data") .. "/whisper_transcriptions",
 	output_file = "transcriptions.md",
 	recording_file = vim.fn.stdpath("data") .. "/whisper_recording.wav",
+	audio_driver = "",
 	audio_device = "default",
 	transcription_timeout = 120000,
 	include_timestamp = false,

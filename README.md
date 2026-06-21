@@ -95,10 +95,11 @@ All fields can be passed to `setup()`:
 |--------|---------|-------------|
 | `whisper_path` | `""` | Path to whisper.cpp binary (empty = auto-detect `whisper-cli`/`main` from `$PATH`). After `make`: `build/bin/whisper-cli` |
 | `model_path` | `""` | Path to GGML model file |
+| `audio_driver` | `""` | Audio capture driver (empty = auto: `alsa` on Linux, `avfoundation` on macOS, `dshow` on Windows) |
+| `audio_device` | `"default"` | Audio device name (auto-wrapped for the active driver) |
 | `output_dir` | `stdpath("data")/whisper_transcriptions` | Transcription output |
 | `output_file` | `transcriptions.md` | Output filename |
 | `recording_file` | `stdpath("data")/whisper_recording.wav` | Temp WAV path |
-| `audio_device` | `"default"` | ALSA device name |
 | `transcription_timeout` | `120000` | Transcription timeout (ms) |
 | `language` | `"de"` | Language code |
 | `stream_chunk_duration` | `5` | Seconds per streaming chunk |

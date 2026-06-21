@@ -5,20 +5,36 @@ function M.check()
 
 	-- System dependencies
 	if vim.fn.executable("ffmpeg") == 1 then
-		vim.health.ok("ffmpeg (audio capture + processing)")
-		local result = vim.fn.system({ "ffmpeg", "-hide_banner", "-sources", "alsa" })
-		local skip = { null = true, lavrate = true, samplerate = true, speexrate = true, jack = true, oss = true, speex = true, upmix = true, vdownmix = true }
+		local os_name = vim.loop.os_uname().sysname
+		if os_name == "Darwin" then os_name = "macos"
+		elseif os_name == "Windows_NT" then os_name = "windows"
+		else os_name = "linux" end
+		local name_map = { linux = "alsa", macos = "avfoundation", windows = "dshow" }
+		vim.health.ok("ffmpeg (audio capture + processing) — driver: " .. name_map[os_name])
+
+		local list_cmd, skip
+		if os_name == "macos" then
+			list_cmd = { "ffmpeg", "-hide_banner", "-list_devices", "true", "-f", "avfoundation", "-i", "''" }
+			skip = {}
+		elseif os_name == "windows" then
+			list_cmd = { "ffmpeg", "-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy" }
+			skip = {}
+		else
+			list_cmd = { "ffmpeg", "-hide_banner", "-sources", "alsa" }
+			skip = { null = true, lavrate = true, samplerate = true, speexrate = true, jack = true, oss = true, speex = true, upmix = true, vdownmix = true }
+		end
+		local result = vim.fn.system(list_cmd)
 		local devices = {}
 		for line in result:gmatch("[^\n]+") do
 			local name = line:match("^%s+(%S+)%s+%[")
-			if name and not skip[name] then
+			if name and not (skip and skip[name]) then
 				table.insert(devices, name)
 			end
 		end
 		if #devices > 0 then
 			vim.health.ok("audio capture devices: " .. table.concat(devices, ", "))
 		else
-			vim.health.warn("no audio capture devices detected (check your ALSA/PulseAudio config)")
+			vim.health.warn("no audio capture devices detected (check your audio config)")
 		end
 	else
 		vim.health.error("ffmpeg not found (required; install with 'sudo apt install ffmpeg')")
@@ -70,7 +86,9 @@ function M.check()
 	end
 
 	if cfg.audio_device then
-		vim.health.ok("audio device: " .. cfg.audio_device)
+		local drv = m._driver
+		local drv_name = (drv and drv.name) or "?"
+		vim.health.ok("audio device: " .. cfg.audio_device .. " (driver: " .. drv_name .. ")")
 	end
 
 	vim.health.ok("output_dir: " .. cfg.output_dir)

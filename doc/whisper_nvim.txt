@@ -50,10 +50,11 @@ SETUP						*whisper_nvim-setup*
 Configuration fields:
   whisper_path     (string)  Path to whisper-cli binary
   model_path       (string)  Path to GGML model file (.bin)
+  audio_driver     (string)  Audio driver (empty=auto: alsa/avfoundation/dshow)
+  audio_device     (string)  Audio device name (default: "default")
   output_dir       (string)  Directory for transcription output (default: stdpath("data") .. "/whisper_transcriptions")
   output_file      (string)  Filename for markdown transcriptions (default: "transcriptions.md")
   recording_file   (string)  Path for temporary WAV recording (default: stdpath("data") .. "/whisper_recording.wav")
-  audio_device     (string)  ALSA audio device name (default: "default")
   transcription_timeout (number)  Timeout in ms (default: 120000)
   include_timestamp (boolean) Include timestamps (default: false)
   language         (string)  Language code, e.g. "de" or "en" (default: "de")
