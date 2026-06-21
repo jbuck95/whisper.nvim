@@ -14,7 +14,7 @@ Fully local whisper.cpp voice + audio transcription.
 
 - `arecord` (alsa-utils) -- audio capture
 - `ffmpeg` / `ffprobe` -- audio processing
-- `whisper.cpp` binary (`whisper-cli` or `main` from `$PATH`) + GGML model file
+- `whisper.cpp` binary (e.g. `build/bin/whisper-cli` after `make`) + GGML model file
 - `yt-dlp` -- optional, for URL transcription
 
 Verify: `:checkhealth whisper_nvim`  |  Help: `:help whisper_nvim`
@@ -26,13 +26,21 @@ return {
     "jbuck95/whisper.nvim",
     config = function()
         require("whisper_nvim").setup({
-            model_path = "/path/to/ggml-large-v3-turbo.bin",
+            whisper_path = "YOUR_PATH_TO/whisper.cpp/build/bin/whisper-cli",
+            model_path   = "YOUR_PATH_TO/ggml-large-v3-turbo.bin",
         })
     end,
 }
 ```
 
-`whisper_path` is optional — the plugin auto-detects `whisper-cli` or `main` (whisper.cpp build default) from your `$PATH`.
+> `whisper_path` is optional — if empty, the plugin auto-detects `whisper-cli` or
+> `main` from `$PATH`.
+
+## Whisper.cpp
+
+Check [whisper.cpp](https://github.com/ggerganov/whisper.cpp) to install
+whisper.cpp and or download models. Highly recommend you build for gpu.
+
 
 ## Usage
 
@@ -61,9 +69,10 @@ vim.keymap.set("n", "<leader>wu", "<Plug>(whisper-url)")
 ```lua
 local w = require("whisper_nvim")
 
--- Setup (required: model_path; whisper_path auto-detected)
+-- Setup (whisper_path optional, model_path required)
 w.setup({
-  model_path   = "/path/to/ggml-large-v3-turbo.bin",
+  whisper_path = "YOUR_PATH_TO/whisper.cpp/build/bin/whisper-cli",
+  model_path   = "YOUR_PATH_TO/ggml-large-v3-turbo.bin",
 })
 
 -- Microphone recording
@@ -85,7 +94,7 @@ All fields can be passed to `setup()`:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `whisper_path` | `""` | Path to whisper.cpp binary (auto-detects `whisper-cli` / `main` from `$PATH` if empty) |
+| `whisper_path` | `""` | Path to whisper.cpp binary (empty = auto-detect `whisper-cli`/`main` from `$PATH`). After `make`: `build/bin/whisper-cli` |
 | `model_path` | `""` | Path to GGML model file |
 | `output_dir` | `stdpath("data")/whisper_transcriptions` | Transcription output |
 | `output_file` | `transcriptions.md` | Output filename |
@@ -103,8 +112,8 @@ Built on [whisper.cpp](https://github.com/ggerganov/whisper.cpp) by Georgi Gerga
 
 ## Disclaimer
 
-Built for my personal master's thesis workflow.
-AI was used extensively in development.
+Built for my personal master's thesis workflow. AI was used extensively in
+development.
 
 ## License
 
