@@ -6,13 +6,12 @@ function M.check()
 	-- System dependencies
 	if vim.fn.executable("ffmpeg") == 1 then
 		vim.health.ok("ffmpeg (audio capture + processing)")
-		local handle = io.popen("ffmpeg -f alsa -list_devices true -i '' -t 1 2>&1")
-		local result = handle and handle:read("*a") or ""
-		if handle then handle:close() end
+		local result = vim.fn.system({ "ffmpeg", "-hide_banner", "-sources", "alsa" })
+		local skip = { null = true, lavrate = true, samplerate = true, speexrate = true, jack = true, oss = true, speex = true, upmix = true, vdownmix = true }
 		local devices = {}
 		for line in result:gmatch("[^\n]+") do
-			local name = line:match('"([^"]+)"')
-			if name then
+			local name = line:match("^%s+(%S+)%s+%[")
+			if name and not skip[name] then
 				table.insert(devices, name)
 			end
 		end
